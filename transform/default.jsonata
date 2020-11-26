@@ -1,0 +1,124 @@
+$.(
+    $comment := '*******************************************************';
+    $comment := '*******************************************************';
+    $comment := 'BASIC TRANSFORM FOR PERCIPIO ASSET DATA';
+    $comment := 'Author: martinholden-skillsoft';
+    $comment := 'Date: 26-NOV-2020';
+    $comment := '*******************************************************';
+    $comment := '*******************************************************';
+
+    $comment := '*******************************************************';
+    $comment := '* Converts an array of strings to a grouped';
+    $comment := '* array of objects';
+    $comment := '* @param {array} $source';
+    $comment := '* @param {number} [$groupsize=10] - The number of items in each group';
+    $comment := '* @param {string} [$prefix=GROUP_] - The string prefix for each key';
+    $comment := '* @param {number} [$padwidth=-2] - Total width of number value with zero padding.';
+    $comment := '*                 If a positive number, padded to the right; if negative, padded to the left';
+    $comment := '*                 Default of -2 gives 01, 02 etc.';
+    $comment := '*                 See https://docs.jsonata.org/string-functions#pad';
+    $comment := '* @returns {array[]}';
+    $comment := '*******************************************************';
+    $getChunks := function ($source, $groupsize, $prefix, $padwidth) {
+    (
+        $groupsize := $groupsize ? $groupsize : 10;
+        $arrayChunks := $ceil($count($source) / $groupsize);
+        $prefix := $prefix ? $prefix : 'GROUP_';
+        $padwidth := $padwidth ? $padwidth : -2;
+        $map([0..$arrayChunks], function ($v, $i) {
+            (
+                $start := $v * $groupsize;
+                $end := $start + $groupsize;
+                $merge($map(
+                        $filter($source, function ($v, $i) {
+                            (
+                                $i >= $start and $i < $end)
+                        }), function ($v, $i, $a) {
+                        ({
+                            $prefix & $pad($string($i + 1), $padwidth, '0'): $v
+                        })
+                    })); )
+        }); )
+};
+
+    $comment := 'The maximum number of Columns for the grouped strings';
+    $comment := 'then an array of result objects for each input record is returned.';
+    $comment := 'So as example if item has 10 collections and we specify 3, we will get 4 records';
+    $comment := 'for each item. First has Collections 1,2,3, next has 4,5,6 etc';
+    $maxColumns := 10;
+
+    $comment := 'The length of the nnn value zero padded, -2 means pad to 2 characters by adding 0 to left';
+    $padWidth := -2;
+
+    $areasColumns := $map([0..$maxColumns - 1], function ($v, $i) {
+        ({
+            'AREAS_' & $pad($string($i + 1), $padWidth, '0'): ''
+        })
+    });
+
+    $subjectColumns := $map([0..9], function ($v, $i) {
+        ({
+            'SUBJECTS_' & $pad($string($i + 1), $padWidth, '0'): ''
+        })
+    });
+
+    $comment := '*******************************************************';
+    $comment := 'Define the columns we want in our output, this also lets';
+    $comment := 'us set the column order';
+    $required_columns := {
+    'ID': '',
+    'TYPE': '',
+    'TITLE': '',
+    'DESCRIPTION': '',
+    'LOCALE': '',
+    'MINUTES': '',
+    'MODALITY': '',
+    'LAUNCHLINK': '',
+    'THUMBNAIL': '',
+    'STATUS' : '',
+    'LASTUPDATED' : '',
+    'LASTUPDATED_RELATIVE' : ''
+};
+
+    $comment := 'Add the grouped columns';
+    $required_columns := $merge([$required_columns, $areasColumns, $subjectColumns]);
+
+    $base_transformed_data := (
+        $.{
+        'ID': id,
+        'TYPE': contentType.displayLabel ? contentType.displayLabel : '',
+        'TITLE': localizedMetadata[0].title,
+        'DESCRIPTION': localizedMetadata[0].description,
+        'LOCALE': localizedMetadata[0].localeCode,
+        'MINUTES': duration ? $round($momentDuration(duration).asMinutes(),0) : '',
+        'MODALITY': $join(modalities, ','),
+        'LAUNCHLINK': link,
+        'THUMBNAIL': imageUrl,
+        'STATUS' : lifecycle.status,
+        'LASTUPDATED' : lifecycle.lastUpdatedDate ? lifecycle.lastUpdatedDate : '',
+        'LASTUPDATED_RELATIVE' : lifecycle.lastUpdatedDate ? $moment(lifecycle.lastUpdatedDate).fromNow() : ''
+    });
+
+    $comment := '*******************************************************';
+    $comment := 'Merge the $required_columns object and the $base_transformed_data_data';
+    $comment := 'Values in $required_columns object are overwritten';
+    $transformed_data := $merge([$required_columns, $base_transformed_data]);
+
+    $comment := 'Add Columns for each Area the content belongs in';
+    $transformed_data := $map($getChunks(associations.areas, $maxColumns, 'AREAS_', $padWidth), function ($v, $i, $a) {
+        (
+            $comment := '$v is the object with AREAS_';
+            $comment := 'Merging this object with the already transformed data overwrites the Area fields';
+            $merge([$transformed_data, $v]); )
+    });
+
+    $comment := 'Add Columns for each Subject teh content belongs in';
+    $transformed_data := $map($getChunks(associations.subjects, $maxColumns, 'SUBJECTS_', $padWidth), function ($v, $i, $a) {
+        (
+            $comment := '$v is the object with AREAS_';
+            $comment := 'Merging this object with the already transformed data overwrites the Subject fields';
+            $merge([$transformed_data, $v]); )
+    });
+
+    $transformed_data;
+)
