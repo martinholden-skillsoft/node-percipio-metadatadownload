@@ -1,0 +1,122 @@
+$.(
+    $comment := '*******************************************************';
+    $comment := '*******************************************************';
+    $comment := 'BASIC LIST';
+    $comment := 'Used for Demo Loading a SharePoint list';
+    $comment := 'Author: martinholden-skillsoft';
+    $comment := 'Date: 26-NOV-2020';
+    $comment := '*******************************************************';
+
+    $comment := '*******************************************************';
+    $comment := '* The plain text version of the localizedMetadata[0].title';
+    $comment := '* Prefixed with contentType.displayLabel in () and ';
+    $comment := '* including the technologies[0].title and';
+    $comment := '* technologies[0].version';
+    $comment := '* Shortened to $length with ellipsis string of ...';
+    $comment := '* @param {boolean} [$includecontenttype=true] - Include';
+    $comment := '*                  the contentype :';
+    $comment := '* @param {boolean} [$includetechnology=true] - Include';
+    $comment := '*                  the technology and version in title';
+    $comment := '*                  if title does not contain :';
+    $comment := '* @param {number} [$length=255] - Maximum length';
+    $comment := '* @returns {string}';
+    $comment := '*******************************************************';
+    $metadatatitle := function($includecontenttype, $includetechnology,$length){(
+        $maxlength := $exists($length) ? $length : 255;
+        $addtechnology := $exists($includetechnology) ? $boolean($includetechnology) : true;
+        $addtechnology := $addtechnology ? ($contains(localizedMetadata[0].title, ':') ? false : true) : $addtechnology;
+
+        $addcontenttype := $exists($includecontenttype) ? $boolean($includecontenttype) : true;
+
+        $contenttypestring := $addcontenttype ? '(' & contentType.displayLabel & ') ' : '';
+
+        $technologystring := $addtechnology ? (technologies[0].title ? $htmltotext(technologies[0].title) & (technologies[0].version? ' ' & $htmltotext(technologies[0].version))& ': ');
+
+        $fulltitle := $contenttypestring & $technologystring & $htmltotext(localizedMetadata[0].title);
+
+        $truncateConfig := {
+            'length': $maxlength,
+            'omission': '...'
+        };
+
+        $truncate($fulltitle, $truncateConfig);
+    )};
+
+    $comment := '*******************************************************';
+    $comment := '* Plain text version of the localizedMetadata[0].title.';
+    $comment := '* and if defined add, delimited by $eol:';
+    $comment := '*     Comma Delimited list of Authors from by';
+    $comment := '*     Copyright Publisher and date from publication.publisher';
+    $comment := '*     and publication.copyrightYear';
+    $comment := '*     ISBN from publication.isbn';
+    $comment := '* Shortened to $length with ellipsis string of ...';
+    $comment := '* @param {number} [$length=2000] - Maximum length';
+    $comment := '* @param {string} [$eol=\r\n] - The EOL characters to use';
+    $comment := '* @returns {string}';
+    $comment := '*******************************************************';
+    $metadataextendeddescription := function($length, $eol){(
+        $maxlength:= $length ? $length : 2000;
+        $myeol:= $eol ? $eol : '\r\n';
+        $by:= $count(by) = 0 ? '' : 'By: ' & $join(by, ', ') & $myeol;
+
+        $publisher := publication ? publication.publisher ? $join(['Copyright:', publication.publisher],' ') : '' : '';
+        $year := publication ? publication.copyrightYear ? $join(['(c)', $string(publication.copyrightYear)],' ') : '' : '';
+        $copyright := publication ? $join([$publisher, $year],' ') & $myeol : '';
+        $isbn := publication ? publication.isbn ? $join(['ISBN:', publication.isbn],' ') & $myeol : '' : '';
+
+        $publication := publication ? $join([$copyright,$isbn]) : '';
+
+        $truncateConfig := {
+            'length': $maxlength,
+            'omission': '...'
+        };
+
+        $truncate($join([$by,$publication,$htmltotext(localizedMetadata[0].description)]), $truncateConfig);
+    )};
+
+    $comment := '*******************************************************';
+    $comment := '*******************************************************';
+    $comment := 'START OF TRANSFORM';
+
+    $comment := '*******************************************************';
+    $comment := 'Define the columns we want in our output, this also lets';
+    $comment := 'us set the column order';
+    $required_columns := {
+        'TITLE': '',
+        'DESCRIPTION': '',
+        'LAUNCH': '',
+        'THUMBNAIL': '',
+        'TYPE': '',
+        'MINUTES': '',
+        'MODALITY': '',
+        'STATUS': '',
+        'LANGUAGE': '',
+        'LOCALE': '',
+        'LASTUPDATED': '',
+        'LASTUPDATED_RELATIVE': '',
+        'UUID': ''
+    };
+
+    $base_transformed_data := (
+        $.{
+            'TITLE': localizedMetadata[0].title ? $metadatatitle(false, true, 254) : '',
+            'DESCRIPTION': localizedMetadata[0].description ? $metadataextendeddescription(2000,'\r\n'): '',
+            'LAUNCH': link,
+            'THUMBNAIL': imageUrl,
+            'TYPE': contentType ? contentType.displayLabel : '',
+            'MINUTES': duration ? $round($momentDuration(duration).asMinutes(), 0) : '',
+            'MODALITY': modalities ? $join(modalities,'|') : '',
+            'STATUS': lifecycle.status,
+            'LANGUAGE': $languageInfo(localeCodes[0]).language.name,
+            'LOCALE': $languageInfo(localeCodes[0]).region.name ? $languageInfo(localeCodes[0]).region.name : '',
+            'LASTUPDATED' : lifecycle.lastUpdatedDate ? lifecycle.lastUpdatedDate : '',
+            'LASTUPDATED_RELATIVE' : lifecycle.lastUpdatedDate ? $moment(lifecycle.lastUpdatedDate).fromNow() : '',
+            'UUID': id,
+        }
+    );
+
+    $comment := '*******************************************************';
+    $comment := 'Merge the $required_columns object and the $base_transformed_data_data';
+    $comment := 'Values in $required_columns object are overwritten';
+    $merge([$required_columns, $base_transformed_data]);
+)

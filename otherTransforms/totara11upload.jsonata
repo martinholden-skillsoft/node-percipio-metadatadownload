@@ -1,0 +1,267 @@
+$.(
+    $comment := '*******************************************************';
+    $comment := '*******************************************************';
+    $comment := 'TRANSFORM FOR Totara 11.x Course Upload POC';
+    $comment := 'See https://help.totaralearning.com/display/TL110/Uploading+Multiple+Courses';
+    $comment := 'Author: martinholden-skillsoft';
+    $comment := 'Date: 26-AUG-2020';
+    $comment := 'Dependency: Uses functions from https://www.npmjs.com/package/jsonata-extended';
+    $comment := '*******************************************************';
+    $comment := '*******************************************************';
+
+    $comment := '*******************************************************';
+    $comment := '*******************************************************';
+    $comment := 'Start of configuration variables';
+    $comment := 'These are the values that can be changed to modify the output';
+
+    $comment := '* Whether to use the extended description option';
+    $comment := '* This combines the descripion and publication data';
+    $comment := '* See the $metadataextendeddescription function below';
+    $commonUseExtendedDescription := true;
+
+    $comment := '* The EOL characters to use for the Extended Description';
+    $comment := '* See the $metadataextendeddescription function below';
+    $commonExtendedDescriptionEOL := '<br/>';
+
+    $comment := '* Whether to include contentType.displayLabel as prefix to title';
+    $comment := '* See the $metadatatitle function above';
+    $commonIncludeContentTypeInTitle := false;
+
+    $comment := '* Whether to include technologies[0].title and version as prefix to title';
+    $comment := '* See the $metadatatitle function below';
+    $commonIncludeTechnologyDetailsInTitle := true;
+
+    $comment := '* The number of tags values to include set to 0 to not return any';
+    $comment := '* For more information see the $moodletagsarray function below';
+    $moodleMaxTags := 10;
+
+    $comment := 'End of configuration ariables';
+    $comment := '*******************************************************';
+    $comment := '*******************************************************';
+
+    $comment := '*******************************************************';
+    $comment := '*******************************************************';
+    $comment := 'Start of Custom JSONata Functions';
+
+    $comment := '*******************************************************';
+    $comment := '* The plain text version of the localizedMetadata[0].title';
+    $comment := '* Prefixed with contentType.displayLabel in () and ';
+    $comment := '* including the technologies[0].title and';
+    $comment := '* technologies[0].version';
+    $comment := '* Shortened to $length with ellipsis string of ...';
+    $comment := '* @param {boolean} [$includecontenttype=true] - Include';
+    $comment := '*                  the contentype :';
+    $comment := '* @param {boolean} [$includetechnology=true] - Include';
+    $comment := '*                  the technology and version in title';
+    $comment := '*                  if title does not contain :';
+    $comment := '* @param {number} [$length=255] - Maximum length';
+    $comment := '* @returns {string}';
+    $comment := '*******************************************************';
+    $metadatatitle := function($includecontenttype, $includetechnology,$length){(
+        $maxlength := $exists($length) ? $length : 255;
+        $addtechnology := $exists($includetechnology) ? $boolean($includetechnology) : true;
+        $addtechnology := $addtechnology ? ($contains(localizedMetadata[0].title, ':') ? false : true) : $addtechnology;
+
+        $addcontenttype := $exists($includecontenttype) ? $boolean($includecontenttype) : true;
+
+        $contenttypestring := $addcontenttype ? '(' & contentType.displayLabel & ') ' : '';
+
+        $technologystring := $addtechnology ? (technologies[0].title ? $htmltotext(technologies[0].title) & (technologies[0].version? ' ' & $htmltotext(technologies[0].version))& ': ');
+
+        $fulltitle := $contenttypestring & $technologystring & $htmltotext(localizedMetadata[0].title);
+
+        $truncate($fulltitle, {"length": $maxlength, "omission": "..."});
+    )};
+
+    $comment := '*******************************************************';
+    $comment := '* Plain text version of the localizedMetadata[0].description.';
+    $comment := '*  Shortened to $length with ellipsis string of ...';
+    $comment := '* @param {number} [$length=2000] - Maximum length';
+    $comment := '* @returns {string}';
+    $comment := '*******************************************************';
+    $metadatadescription := function($length){(
+        $maxlength:= $length ? $length : 2000;
+        $truncate($htmltotext(localizedMetadata[0].description), {"length": $maxlength, "omission": "..."});
+    )};
+
+
+    $comment := '*******************************************************';
+    $comment := '* Plain text version of the localizedMetadata[0].title.';
+    $comment := '* and if defined add, delimited by $eol:';
+    $comment := '*     Comma Delimited list of Authors from by';
+    $comment := '*     Copyright Publisher and date from publication.publisher';
+    $comment := '*     and publication.copyrightYear';
+    $comment := '*     ISBN from publication.isbn';
+    $comment := '* Shortened to $length with ellipsis string of ...';
+    $comment := '* @param {number} [$length=2000] - Maximum length';
+    $comment := '* @param {string} [$eol=\r\n] - The EOL characters to use';
+    $comment := '* @param {string} [$extraText=] - The the text that is prepended';
+    $comment := '* @returns {string}';
+    $comment := '*******************************************************';
+    $metadataextendeddescription := function($length, $eol, $extraText){(
+        $maxlength:= $length ? $length : 2000;
+        $myeol:= $eol ? $eol : '\r\n';
+        $by:= $count(by) = 0 ? '' : 'By: ' & $join(by, ', ') & $myeol;
+
+        $publisher := publication ? publication.publisher ? $join(['Copyright:', publication.publisher],' ') : '' : '';
+        $year := publication ? publication.copyrightYear ? $join(['(c)', $string(publication.copyrightYear)],' ') : '' : '';
+        $copyright := publication ? $join([$publisher, $year],' ') & $myeol : '';
+        $isbn := publication ? publication.isbn ? $join(['ISBN:', publication.isbn],' ') & $myeol : '' : '';
+
+        $publication := publication ? $join([$copyright,$isbn]) : '';
+        $plaindesc := $htmltotext(localizedMetadata[0].description);
+        $contenttype := contentType.displayLabel ? $join(['Type:',contentType.displayLabel],' ')  & $myeol : '';
+
+        $truncate($join([$extraText,$contenttype,$by,$publication,$plaindesc]), {"length": $maxlength, "omission": "..."});
+    )};
+
+
+    $comment := '*******************************************************';
+    $comment := '* Create a string[] that is deduplicated of values that combines these';
+    $comment := '* data values:';
+    $comment := '*   contentType.displayLabel';
+    $comment := '*   localizedMetadata[0].title if contentType.percipioType is channel';
+    $comment := '*   keywords';
+    $comment := '*   associations.areas';
+    $comment := '*   associations.subjects';
+    $comment := '*   associations.channels[*].title';
+    $comment := '*   $otherTag variable';
+    $comment := '* @param {string} [$otherTag=] - Additional Tag to include';
+    $comment := '* @param {number} [$maxCount=10] - Maximum number of tags';
+    $comment := '* @returns {string[]}';
+    $comment := '*******************************************************';
+    $moodletagsarray := function($otherTag, $maxCount){(
+        $maxtags := $maxCount ? $maxCount : 10;
+        $padarray := [1..$maxtags].('');
+        $tags := [];
+        $tags :=  $lowercase(contentType.percipioType) = 'channel' ? $append($tags,[localizedMetadata[0].title]) : $tags;
+        $tags :=  $lowercase(contentType.percipioType) = 'journey' ? $append($tags,[localizedMetadata[0].title]) : $tags;
+        $tags := keywords ? $append($tags,keywords) : $tags;
+        $tags := $append($tags, $map(associations.areas, function($v, $i, $a) {
+            $v ? $trim($v) : ''
+        }));
+        $tags := $append($tags, $map(associations.subjects, function($v, $i, $a) {
+            $v ? $trim($v) : ''
+        }));
+        $tags := $append($tags, $map(associations.channels, function($v, $i, $a) {
+            $v.title ? $trim($v.title) : ''
+        }));
+        $tags := $map($sort($tags),function($v, $i, $a){
+            $i != 0 ? (( $v = $a[$i-1] ) ? '': $v) : $v }
+        );
+
+        $comment := 'Ensure type is always first tag, followed by $otherTag so we prioritizes these';
+        $tags := $otherTag ? $append([ $otherTag], $tags) : $tags;
+        $tags := $append([contentType.displayLabel], $tags);
+
+        $tags := $append($tags, $padarray);
+        $tags := $filter($tags, function ($v, $i, $a) {
+            $i < $maxtags
+        });
+        $tags := $filter($tags, function($v, $i, $a) {
+            $v != ''
+        });
+        $tags
+    )};
+
+    $comment := '*******************************************************';
+    $comment := '* Create a HTML description for the page, each of these';
+    $comment := '* end with a <br/>';
+    $comment := '*     Comma Delimited list of Authors from by';
+    $comment := '*     Copyright Publisher and date from publication.publisher';
+    $comment := '*     and publication.copyrightYear';
+    $comment := '*     ISBN from publication.isbn';
+    $comment := '*     imageUrl is added as a hyperlink';
+    $comment := '*     localizedMetadata[0].description';
+    $comment := '*     Launch text is added as a hyperlink';
+    $comment := '*     The content type contentType.displayLabel';
+    $comment := '* @param {object} $row - The object to process';
+    $comment := '* @param {string} [$extraHTML=] - extra HTML to include at top of description';
+    $comment := '* @returns {string} object';
+    $comment := '*******************************************************';
+    $moodledescriptionobject := function($row, $extraHTML){(
+        $launchpathstart := $row.link ? '<a href="' & $row.link & '" target="_blank">' : null;
+
+        $thumbnail := $row.imageUrl ? $launchpathstart & '<img src="' & $row.imageUrl & '?width=400" alt="' & $row.localizedMetadata[0].title & '" class="img-responsive"></a><br/><br/>' : '';
+
+        $contenttype := $row.contentType.displayLabel ? $join(['Type:', $row.contentType.displayLabel],' ') & '<br/>' : '';
+        $by := $count($row.by) = 0 ? '' : 'By: ' & $join($row.by, ', ') & '<br/>';
+        $publisher := $row.publication ? $row.publication.publisher ? $join(['Copyright:', $row.publication.publisher],' ')  : '' : '';
+        $year := $row.publication ? $row.publication.copyrightYear ? $join(['(c)', $string($row.publication.copyrightYear)],' ') : '' : '';
+        $copyright := $row.publication ? $join([$publisher, $year],' ') & '<br/>' : '';
+        $isbn := $row.publication ? $row.publication.isbn ? $join(['ISBN:', $row.publication.isbn],' ') & '<br/>' : '' : '';
+        $launchlink := $launchpathstart ? $launchpathstart & 'Launch</a><br/>' : '';
+        $publication := $row.publication ? $join([$copyright,$isbn]) : '';
+        $description := $row.localizedMetadata[0].description ? '<br/>' & $row.localizedMetadata[0].description & '<br/>' : '';
+
+
+        $join([$thumbnail,$extraHTML,$contenttype,$by,$publication,$description,$launchlink])
+    )};
+    $comment := 'End of Custom JSONata Functions';
+    $comment := '*******************************************************';
+    $comment := '*******************************************************';
+
+
+    $comment := '*******************************************************';
+    $comment := '*******************************************************';
+    $comment := 'START OF TRANSFORM';
+
+    $comment := '*******************************************************';
+    $comment := 'Transform the basic data, uses the CONSTANTS specified above';
+
+    $comment := 'The list of required columns in order as per https://help.totaralearning.com/display/TL110/Uploading+Multiple+Courses';
+    $comment := 'and the defaults.';
+    $comment := 'By default we load all the courses not visible so that they are just stubs to hang results on.';
+    $comment := 'visible = 0';
+    $comment := 'audiencevisisble = 3';
+    $required_columns := {
+        'shortname': '',
+        'fullname': '',
+        'idnumber': '',
+        'category': '7',
+        'visible': '0',
+        'startdate': '',
+        'enddate': '',
+        'summary': '',
+        'format': 'topics',
+        'theme': '',
+        'lang': '',
+        'newsitems': '0',
+        'showgrades': '1',
+        'showreports': '1',
+        'legacyfiles': '0',
+        'maxbytes': '0',
+        'groupmode': '0',
+        'groupmodeforce': '0',
+        'enablecompletion': '1',
+        'audiencevisisble': '3',
+        'coursetype':'0',
+        'tags': ''
+    };
+
+    $comment := 'Create a language tag';
+    $languageTag :=(
+        $lang := $languageInfo(localeCodes[0]);
+        $langregion := $lang.region.name ? '(' & $lang.region.name & ')' : '';
+        $trim($join([$lang.language.name, $langregion],''));
+    );
+
+    $transformed_data := (
+        $.{
+            'shortname': localizedMetadata[0].title ? $join([$metadatatitle($commonIncludeContentTypeInTitle, $commonIncludeTechnologyDetailsInTitle, 215),'(' & id &')'],' ') : '',
+            'fullname': localizedMetadata[0].title ?  $join([$metadatatitle($commonIncludeContentTypeInTitle, $commonIncludeTechnologyDetailsInTitle, 254)],' ') : '',
+            'idnumber': id,
+            'startdate': lifecycle.publishDate ? lifecycle.publishDate : '',
+            'enddate': lifecycle.retiredDate ? lifecycle.retiredDate : '',
+            'summary': (
+                $extraText := $join(['Language:',$languageTag],' ') & $commonExtendedDescriptionEOL;
+                localizedMetadata[0].description ? $commonUseExtendedDescription ? $metadataextendeddescription(2000,$commonExtendedDescriptionEOL, $extraText) : $metadatadescription(2000) : ''
+            )
+          }
+    );
+
+    $comment := '*******************************************************';
+    $comment := 'Merge the $required_columns object and the $transformed_data';
+
+    $merge([$required_columns, $transformed_data]);
+)
