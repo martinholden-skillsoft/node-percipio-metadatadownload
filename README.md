@@ -35,7 +35,7 @@ The [transform/default.jsonata](transform/default.jsonata) shows some ideas for 
 
 ## Environment Configuration
 
-Set the following environment variables, or use the [.env](.env) file
+Set the following environment variables, or create a .env file by copying [.env.example](.env.example) to .env and populating the values.
 
 | ENV        | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
