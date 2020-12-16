@@ -1,3 +1,6 @@
+// Custom Environment Variables, for more information see:
+// https://github.com/lorenwest/node-config/wiki/Environment-Variables#custom-environment-variables
+
 const config = {};
 
 // The transform filename in transform folder.
