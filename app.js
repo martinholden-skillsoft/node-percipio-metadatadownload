@@ -120,6 +120,7 @@ const getAllPages = async (options, axiosInstance = Axios) => {
 
     const opts = options;
     const outputFile = Path.join(opts.output.path, opts.output.filename);
+    opts.logcount = opts.logcount || 500;
 
     let keepGoing = true;
     let reportCount = true;
@@ -145,6 +146,22 @@ const getAllPages = async (options, axiosInstance = Axios) => {
 
       csvStream.on('error', (error) => {
         opts.logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
+      });
+
+      csvStream.on('progress', (counter) => {
+        if (counter % opts.logcount === 0) {
+          opts.logger.info(`Processing. Processed: ${counter.toLocaleString()}`, {
+            label: `${loggingOptions.label}-csvStream`,
+          });
+        }
+      });
+
+      jsonataStream.on('progress', (counter) => {
+        if (counter % opts.logcount === 0) {
+          opts.logger.info(`Processing. Processed: ${counter.toLocaleString()}`, {
+            label: `${loggingOptions.label}-jsonataStream`,
+          });
+        }
       });
 
       outputStream.on('finish', () => {
