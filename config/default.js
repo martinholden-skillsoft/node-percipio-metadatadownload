@@ -22,8 +22,6 @@ config.startTimestamp = config.startTime.format('YYYYMMDD_HHmmss');
 
 // DEBUG Options
 config.debug = {};
-// One of the supported default logging levels for winston - see https://github.com/winstonjs/winston#logging-levels
-config.debug.loggingLevel = 'info';
 config.debug.path = 'results';
 config.debug.filename = defer((cfg) => {
   return `${cfg.startTimestamp}_results.log`;
@@ -34,6 +32,13 @@ config.output = {};
 config.output.path = 'results';
 config.output.filename = defer((cfg) => {
   return `${cfg.startTimestamp}_results.csv`;
+});
+
+// Output the raw JSON received
+config.output.includeRawdata = false;
+
+config.output.rawdatafilename = defer((cfg) => {
+  return `${cfg.startTimestamp}_rawdata.json`;
 });
 
 // Request

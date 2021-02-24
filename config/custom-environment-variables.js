@@ -9,6 +9,10 @@ config.transform = 'TRANSFORM';
 // Boolean that indicates if ALL records should be retrieved
 config.allRecords = 'ALLRECORDS';
 
+config.output = {};
+// Boolean that indicates if the raw JSON should be saved.
+config.output.includeRawdata = 'INCLUDERAWDATA';
+
 config.request = {};
 config.request.bearer = 'BEARER';
 // Base URI to Percipio API
