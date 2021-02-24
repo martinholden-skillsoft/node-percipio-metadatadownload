@@ -10,6 +10,8 @@ const promiseRetry = require('promise-retry');
 const stringifySafe = require('json-stringify-safe');
 const delve = require('dlv');
 const jsonfile = require('jsonfile');
+const Combiner = require('stream-combiner');
+const JSONStream = require('jsonstream2');
 
 const { transports } = require('winston');
 const logger = require('./lib/logger');
@@ -120,6 +122,7 @@ const getAllPages = async (options, axiosInstance = Axios) => {
 
     const opts = options;
     const outputFile = Path.join(opts.output.path, opts.output.filename);
+    const rawoutputfile = Path.join(opts.output.path, opts.output.rawdatafilename);
     opts.logcount = opts.logcount || 500;
 
     let keepGoing = true;
@@ -175,7 +178,22 @@ const getAllPages = async (options, axiosInstance = Axios) => {
         resolve({ data: [], saved: true, outputFile });
       });
 
-      jsonataStream.pipe(csvStream).pipe(outputStream);
+      const rawsteps = [];
+
+      if (opts.output.includeRawdata) {
+        rawsteps.push(JSONStream.stringify());
+        rawsteps.push(fs.createWriteStream(rawoutputfile));
+      }
+
+      const rawchain = new Combiner(rawsteps);
+      rawchain.on('error', (error) => {
+        opts.logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
+      });
+
+      const chain = new Combiner([jsonataStream, csvStream, outputStream]);
+      chain.on('error', (error) => {
+        opts.logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
+      });
 
       while (keepGoing) {
         let response = null;
@@ -221,8 +239,12 @@ const getAllPages = async (options, axiosInstance = Axios) => {
           // Stream the results
           // Iterate over the records and write EACH ONE to the stream individually.
           // Each one of these records will become a JSON object in the output file.
+
           response.data.forEach((record) => {
-            jsonataStream.write(record);
+            if (opts.output.includeRawdata) {
+              rawchain.write(record);
+            }
+            chain.write(record);
           });
         }
 
@@ -230,7 +252,9 @@ const getAllPages = async (options, axiosInstance = Axios) => {
           keepGoing = false;
           // Once we've written each record in the record-set, we have to end the stream so that
           // the TRANSFORM stream knows to output the end of the array it is generating.
-          jsonataStream.end();
+          // jsonataStream.end();
+          rawchain.end();
+          chain.end();
         }
       }
     } catch (error) {
