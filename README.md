@@ -35,14 +35,14 @@ The [transform/default.jsonata](transform/default.jsonata) shows some ideas for 
 
 ## Environment Configuration
 
-Set the following environment variables, or use the [.env](.env) file
+Set the following environment variables, or create a .env file by copying [.env.example](.env.example) to .env and populating the values.
 
-| ENV        | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ORGID      | Required | This is the Percipio Organiation UUID for your Percipio Site.                                                                                                                                                                                                                                                                                                                                                             |
-| BEARER     | Required | This is the Percipio Bearer token for the Service Account.                                                                                                                                                                                                                                                                                                                                                                |
-| BASEURL    | Required | This is set to the base URL for the appropriate Percipio data center. For US hosted use: https://api.percipio.com For EU hosted use: https://dew1-api.percipio.com                                                                                                                                                                                                                                                        |
-| TRANSFORM  | Optional | This is the path to the JSONata transform to use. The default is [transform/default.jsonata](transform/default.jsonata)                                                                                                                                                                                                                                                                                                   |
+| ENV        | Required | Description |
+| ---------- | -------- | ------------|
+| ORGID      | Required | This is the Percipio Organiation UUID for your Percipio Site. |
+| BEARER     | Required | This is the Percipio Bearer token for the Service Account.  |
+| BASEURL    | Required | This is set to the base URL for the appropriate Percipio data center. For US hosted use: https://api.percipio.com For EU hosted use: https://dew1-api.percipio.com |
+| TRANSFORM  | Optional | This is the path to the JSONata transform to use. The default is [transform/default.jsonata](transform/default.jsonata)|
 | ALLRECORDS | Optional | This controls whether all the records are retrieved. The default is **false** which means the date from the [lastrun.json](lastrun.json) file, if it exists, is used as the updatedSince filter for the [API](https://api.percipio.com/content-discovery/api-docs/#/Content/getCatalogContentV2) to retrieve just the changes since that date. If **true** or file does not exist then updatedSince filter is set to null and all records are retrieved. |
 
 <br/>

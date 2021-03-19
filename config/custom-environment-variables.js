@@ -1,3 +1,6 @@
+// Custom Environment Variables, for more information see:
+// https://github.com/lorenwest/node-config/wiki/Environment-Variables#custom-environment-variables
+
 const config = {};
 
 // The transform filename in transform folder.
@@ -5,6 +8,10 @@ config.transform = 'TRANSFORM';
 
 // Boolean that indicates if ALL records should be retrieved
 config.allRecords = 'ALLRECORDS';
+
+config.output = {};
+// Boolean that indicates if the raw JSON should be saved.
+config.output.includeRawdata = 'INCLUDERAWDATA';
 
 config.request = {};
 config.request.bearer = 'BEARER';

@@ -22,8 +22,6 @@ config.startTimestamp = config.startTime.format('YYYYMMDD_HHmmss');
 
 // DEBUG Options
 config.debug = {};
-// One of the supported default logging levels for winston - see https://github.com/winstonjs/winston#logging-levels
-config.debug.loggingLevel = 'info';
 config.debug.path = 'results';
 config.debug.filename = defer((cfg) => {
   return `${cfg.startTimestamp}_results.log`;
@@ -34,6 +32,13 @@ config.output = {};
 config.output.path = 'results';
 config.output.filename = defer((cfg) => {
   return `${cfg.startTimestamp}_results.csv`;
+});
+
+// Output the raw JSON received
+config.output.includeRawdata = false;
+
+config.output.rawdatafilename = defer((cfg) => {
+  return `${cfg.startTimestamp}_rawdata.json`;
 });
 
 // Request
@@ -113,8 +118,13 @@ config.request.uritemplate = `/content-discovery/v2/organizations/{orgId}/catalo
 // Global Web Retry Options for promise retry
 // see https://github.com/IndigoUnited/node-promise-retry#readme
 config.retry_options = {};
-config.retry_options.retries = 3;
+config.retry_options.retries = 10;
 config.retry_options.minTimeout = 1000;
-config.retry_options.maxTimeout = 2000;
+config.retry_options.maxTimeout = Infinity;
+
+// Global Axios Rate Limiting#
+// see https://github.com/aishek/axios-rate-limit
+config.ratelimit = {};
+config.ratelimit.maxRPS = 4;
 
 module.exports = config;
