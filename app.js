@@ -6,20 +6,21 @@ const fs = require('fs');
 const Path = require('path');
 const _ = require('lodash');
 const mkdirp = require('mkdirp');
-const promiseRetry = require('promise-retry');
 const stringifySafe = require('json-stringify-safe');
-const delve = require('dlv');
 const jsonfile = require('jsonfile');
 const Combiner = require('stream-combiner');
 const JSONStream = require('jsonstream2');
 const rateLimit = require('axios-rate-limit');
-const { v4: uuidv4 } = require('uuid');
+const rax = require('retry-axios');
+const { accessSafe } = require('access-safe');
 
 const { transports } = require('winston');
 const logger = require('./lib/logger');
 const pjson = require('./package.json');
 
 const { jsonataTransformStream, csvTransformStream } = require('./lib/streams');
+
+const timingAdapter = require('./lib/timingAdapter');
 
 /**
  * Process the URI Template strings
@@ -40,50 +41,29 @@ const processTemplate = (templateString, templateVars) => {
  * @param {Axios} [axiosInstance=Axios] HTTP request client that provides an Axios like interface
  * @returns {Promise}
  */
-const callPercipio = async (options, axiosInstance = Axios) => {
-  return promiseRetry(async (retry, numberOfRetries) => {
+const callPercipio = (options, axiosInstance = Axios) => {
+  return new Promise((resolve, reject) => {
     const loggingOptions = {
       label: 'callPercipio',
     };
     const opts = _.cloneDeep(options);
-    const correlationid = uuidv4();
-
-    const timings = {
-      sent: null,
-      received: null,
-      duration: null,
-    };
-
     const requestUri = processTemplate(opts.request.uritemplate, opts.request.path);
-    logger.debug(`CorrelationId: ${correlationid}. Request URI: ${requestUri}`, loggingOptions);
 
     let requestParams = opts.request.query || {};
     requestParams = _.omitBy(requestParams, _.isNil);
-    logger.debug(
-      `CorrelationId: ${correlationid}. Request Querystring Parameters: ${stringifySafe(
-        requestParams
-      )}`,
-      loggingOptions
-    );
 
     let requestBody = opts.request.body || {};
     requestBody = _.omitBy(requestBody, _.isNil);
-    logger.debug(
-      `CorrelationId: ${correlationid}. Request Body: ${stringifySafe(requestBody)}`,
-      loggingOptions
-    );
-
-    const customdata = delve(opts, 'response.customdata', null);
 
     const axiosConfig = {
       baseURL: opts.request.baseURL,
       url: requestUri,
       headers: {
         Authorization: `Bearer ${opts.request.bearer}`,
-        'x-correlation-id': correlationid,
       },
       method: opts.request.method,
       timeout: opts.request.timeout || 2000,
+      loggingOptions,
     };
 
     if (!_.isEmpty(requestBody)) {
@@ -94,72 +74,35 @@ const callPercipio = async (options, axiosInstance = Axios) => {
       axiosConfig.params = requestParams;
     }
 
-    logger.debug(
-      `CorrelationId: ${correlationid}. Axios Config: ${stringifySafe(axiosConfig)}`,
-      loggingOptions
-    );
-
-    try {
-      timings.sent = new Date();
-      const response = await axiosInstance.request(axiosConfig);
-      timings.received = new Date();
-      timings.duration = Math.abs(timings.received.getTime() - timings.sent.getTime());
-
-      response.timings = timings;
-      response.correlationid = correlationid;
-      response.retries = numberOfRetries;
-      response.customdata = customdata;
-
-      logger.debug(
-        `CorrelationId: ${correlationid}. Response Headers: ${stringifySafe(
-          response.headers
-        )} Timings: ${stringifySafe(timings)}`,
-        loggingOptions
-      );
-
-      if (!_.isNull(customdata)) {
+    axiosInstance
+      .request(axiosConfig)
+      .then((response) => {
         logger.debug(
-          `CorrelationId: ${correlationid}. Response Custom Data: ${stringifySafe(
-            response.customdata
+          `CorrelationId: ${response.config.correlationid}. Response Headers: ${stringifySafe(
+            response.headers
           )}`,
           loggingOptions
         );
-      }
-
-      return response;
-    } catch (err) {
-      if (err.response) {
-        logger.debug(
-          `CorrelationId: ${correlationid}. Response Headers: ${stringifySafe(
-            err.response.headers
-          )}`,
-          loggingOptions
-        );
-        logger.debug(
-          `CorrelationId: ${correlationid}. Response Body: ${stringifySafe(err.response.data)}`,
-          loggingOptions
-        );
-      } else {
-        logger.debug(
-          `CorrelationId: ${correlationid}. No Response Object available`,
-          loggingOptions
-        );
-      }
-      if (numberOfRetries < opts.retry_options.retries + 1) {
-        logger.warn(
-          `CorrelationId: ${correlationid}. Got Error after Attempt# ${numberOfRetries} : ${err}. Retrying Request.`,
-          loggingOptions
-        );
-        retry(err);
-      } else {
-        logger.error(
-          `CorrelationId: ${correlationid}. Maximum Retries reached. Failed to call Percipio`,
-          loggingOptions
-        );
-      }
-      throw err;
-    }
-  }, options.retry_options);
+        resolve(response);
+      })
+      .catch((err) => {
+        if (err.response) {
+          logger.debug(
+            `CorrelationId: ${err.response.config.correlationid}. Response Headers: ${stringifySafe(
+              err.response.headers
+            )}`,
+            loggingOptions
+          );
+          logger.debug(
+            `CorrelationId: ${err.response.config.correlationid}. Response Body: ${stringifySafe(
+              err.response.data
+            )}`,
+            loggingOptions
+          );
+        }
+        reject(err);
+      });
+  });
 };
 
 /**
@@ -172,15 +115,14 @@ const callPercipio = async (options, axiosInstance = Axios) => {
  * @param {Axios} [axiosInstance=Axios] HTTP request client that provides an Axios like interface
  * @returns {Promise} Resolves to number of records processed
  */
-const getPage = async (
+const getPage = (
   options,
   offset,
   transformProcessStream = new Combiner([]),
   rawProcessStream = new Combiner([]),
   axiosInstance = Axios
 ) => {
-  // eslint-disable-next-line no-async-promise-executor
-  return new Promise(async (resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const loggingOptions = {
       label: 'getPage',
     };
@@ -188,35 +130,27 @@ const getPage = async (
     const opts = _.cloneDeep(options);
     opts.request.query.offset = offset;
 
-    opts.response = {
-      customdata: {
-        max: opts.request.query.max,
-        offset,
-      },
-    };
-
-    const result = {
-      count: 0,
-      customdata: null,
-    };
-
     try {
-      // eslint-disable-next-line no-await-in-loop
-      await callPercipio(opts, axiosInstance).then((response) => {
-        result.count = delve(response, 'data.length', 0);
-        result.customdata = delve(response, 'customdata', { offset: null, max: null, ms: null });
+      callPercipio(opts, axiosInstance).then((response) => {
+        const result = {
+          count: accessSafe(() => response.data.length, 0),
+          offset: accessSafe(() => response.config.params.offset, 0),
+          max: accessSafe(() => response.config.params.max, 0),
+          start: accessSafe(() => response.config.params.offset, 0),
+          end:
+            accessSafe(() => response.config.params.offset, 0) +
+            accessSafe(() => response.config.params.max, 0),
+          duration: accessSafe(() => response.timings.durationms, null),
+          sent: accessSafe(() => response.timings.sent.toISOString(), null),
+        };
 
         const message = [];
         message.push(
-          `Request for ${result.customdata.offset.toLocaleString()} to ${(
-            result.customdata.offset + result.customdata.max
-          ).toLocaleString()}.`
+          `Content Data Requested ${result.start.toLocaleString()} to ${result.end.toLocaleString()}.`
         );
-        message.push(
-          response.timings.duration ? `Request Duration ms: ${response.timings.duration}.` : ''
-        );
-        message.push(`Retries: ${response.retries.toLocaleString()}.`);
-        message.push(`Records Downloaded: ${result.count.toLocaleString()}.`);
+        message.push(`Request Duration ms: ${result.duration}.`);
+        message.push(`Request Sent: ${result.sent}.`);
+        message.push(`Total Content Data Downloaded: ${result.count.toLocaleString()}.`);
         logger.info(`${message.join(' ')}`, loggingOptions);
 
         if (result.count > 0) {
@@ -226,8 +160,10 @@ const getPage = async (
             }
             transformProcessStream.write(record);
           });
+          resolve(result);
+        } else {
+          resolve(result);
         }
-        resolve(result);
       });
     } catch (err) {
       logger.error(`ERROR: trying to download results : ${err}`, loggingOptions);
@@ -244,9 +180,8 @@ const getPage = async (
  * @param {Axios} [axiosInstance=Axios] HTTP request client that provides an Axios like interface
  * @returns {Promise} resolves to boolean to indicate if results saved and the filename
  */
-const getAllPages = async (options, maxrecords, axiosInstance = Axios) => {
-  // eslint-disable-next-line no-async-promise-executor
-  return new Promise(async (resolve, reject) => {
+const getAllPages = (options, maxrecords, axiosInstance = Axios) => {
+  return new Promise((resolve, reject) => {
     const loggingOptions = {
       label: 'getAllPages',
     };
@@ -335,10 +270,12 @@ const getAllPages = async (options, maxrecords, axiosInstance = Axios) => {
         for (let index = 0; index <= maxrecords; index += opts.request.query.max) {
           requests.push(getPage(opts, index, chain, rawchain, axiosInstance));
         }
-        await Promise.allSettled(requests).then((data) => {
+
+        Promise.allSettled(requests).then((data) => {
           logger.debug(`Results. ${stringifySafe(data)}`, loggingOptions);
           downloadedRecords = data.reduce((total, currentValue) => {
-            return total + delve(currentValue, 'value.count', 0);
+            const count = accessSafe(() => currentValue.value.count, 0);
+            return total + count;
           }, 0);
 
           // Once we've written each record in the record-set, we have to end the stream so that
@@ -364,9 +301,8 @@ const getAllPages = async (options, maxrecords, axiosInstance = Axios) => {
  * @param {Axios} [axiosInstance=Axios] HTTP request client that provides an Axios like interface
  * @returns {Promise} Promise object resolves to obect with total and pagingRequestId.
  */
-const getAssetCount = async (options, axiosInstance = Axios) => {
-  // eslint-disable-next-line no-async-promise-executor
-  return new Promise(async (resolve, reject) => {
+const getAssetCount = (options, axiosInstance = Axios) => {
+  return new Promise((resolve, reject) => {
     const loggingOptions = {
       label: 'getAssetCount',
     };
@@ -374,32 +310,29 @@ const getAssetCount = async (options, axiosInstance = Axios) => {
     const opts = _.cloneDeep(options);
     opts.request.query.max = 1;
 
-    let response = null;
-
     const results = {
       total: null,
       pagingRequestId: null,
     };
 
     try {
-      // eslint-disable-next-line no-await-in-loop
-      response = await callPercipio(opts, axiosInstance);
+      callPercipio(opts, axiosInstance).then((response) => {
+        results.total = parseInt(response.headers['x-total-count'], 10);
+        results.pagingRequestId = response.headers['x-paging-request-id'];
+        logger.info(
+          `Total Records to download as reported in header['x-total-count'] ${results.total.toLocaleString()}`,
+          loggingOptions
+        );
+        logger.info(
+          `Paging request id in header['x-paging-request-id'] ${results.pagingRequestId}`,
+          loggingOptions
+        );
+        resolve(results);
+      });
     } catch (err) {
       logger.error('ERROR: trying to download results', loggingOptions);
       reject(err);
     }
-
-    results.total = parseInt(response.headers['x-total-count'], 10);
-    results.pagingRequestId = response.headers['x-paging-request-id'];
-    logger.info(
-      `Total Records to download as reported in header['x-total-count'] ${results.total.toLocaleString()}`,
-      loggingOptions
-    );
-    logger.info(
-      `Paging request id in header['x-paging-request-id'] ${results.pagingRequestId}`,
-      loggingOptions
-    );
-    resolve(results);
   });
 };
 
@@ -409,7 +342,7 @@ const getAssetCount = async (options, axiosInstance = Axios) => {
  * @param {*} options
  * @returns
  */
-const main = async (configOptions) => {
+const main = (configOptions) => {
   const loggingOptions = {
     label: 'main',
   };
@@ -454,7 +387,7 @@ const main = async (configOptions) => {
   const lastrunFile = 'lastrun.json';
 
   // If the ALLRECORDS env is set force null updatedSince
-  if (delve(options, 'allRecords', false)) {
+  if (accessSafe(() => options.allRecords, false)) {
     if (fs.existsSync(lastrunFile)) {
       fs.unlinkSync(lastrunFile);
     }
@@ -481,30 +414,51 @@ const main = async (configOptions) => {
 
   // Create an axios instance that this will allow us to replace
   // with ratelimiting
-  const axiosInstance = rateLimit(Axios.create(), options.ratelimit);
+  // see https://github.com/aishek/axios-rate-limit
+  const axiosInstance = rateLimit(Axios.create({ adapter: timingAdapter }), options.ratelimit);
 
-  await getAssetCount(options, axiosInstance).then(async (response) => {
+  // Add Axios Retry
+  // see https://github.com/JustinBeckwith/retry-axios
+  axiosInstance.defaults.raxConfig = _.merge(
+    {},
+    {
+      instance: axiosInstance,
+      // You can detect when a retry is happening, and figure out how many
+      // retry attempts have been made
+      onRetryAttempt: (err) => {
+        const raxcfg = rax.getConfig(err);
+        logger.warn(
+          `CorrelationId: ${err.config.correlationid}. Retry attempt #${raxcfg.currentRetryAttempt}`,
+          err.config.loggingOptions
+        );
+      },
+    },
+    options.rax
+  );
+  rax.attach(axiosInstance);
+
+  getAssetCount(options, axiosInstance).then((response) => {
     // Percipio API returns a paged response, so retrieve all pages
     options.request.query.pagingRequestId = response.pagingRequestId;
 
     if (response.total > 0) {
-      await getAllPages(options, response.total, axiosInstance)
+      getAllPages(options, response.total, axiosInstance)
         .then(() => {
           const obj = {
             orgid: options.request.path.orgId,
             date: options.startTime.format(),
           };
           jsonfile.writeFileSync(lastrunFile, obj);
+          logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
         })
         .catch((err) => {
           logger.error(`Error:  ${err}`, loggingOptions);
         });
     } else {
       logger.info('No records to download', loggingOptions);
+      logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
     }
   });
-
-  logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
   return true;
 };
 
