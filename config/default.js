@@ -115,16 +115,21 @@ config.request.method = 'get';
 // The Service Path
 config.request.uritemplate = `/content-discovery/v2/organizations/{orgId}/catalog-content`;
 
-// Global Web Retry Options for promise retry
-// see https://github.com/IndigoUnited/node-promise-retry#readme
-config.retry_options = {};
-config.retry_options.retries = 10;
-config.retry_options.minTimeout = 1000;
-config.retry_options.maxTimeout = Infinity;
+// Global Axios Retry Settings
+// see https://github.com/JustinBeckwith/retry-axios
+config.rax = {};
+// Retry 3 times on requests that return a response (500, etc) before giving up.
+config.rax.retry = 3;
+// Retry twice on errors that don't return a response (ENOTFOUND, ETIMEDOUT, etc).
+config.rax.noResponseRetries = 2;
+// You can set the backoff type.
+// options are 'exponential' (default), 'static' or 'linear'
+config.rax.backoffType = 'exponential';
 
 // Global Axios Rate Limiting#
 // see https://github.com/aishek/axios-rate-limit
 config.ratelimit = {};
-config.ratelimit.maxRPS = 4;
+config.ratelimit.maxRequests = 1;
+config.ratelimit.perMilliseconds = 2000;
 
 module.exports = config;
