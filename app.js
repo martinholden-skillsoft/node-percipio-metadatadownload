@@ -432,6 +432,18 @@ const main = (configOptions) => {
           err.config.loggingOptions
         );
       },
+      // Override the decision making process on if you should retry
+      shouldRetry: (err) => {
+        const cfg = rax.getConfig(err);
+        // ensure max retries is always respected
+        if (cfg.currentRetryAttempt >= cfg.retry) return false;
+
+        // Always retry if response was not JSON
+        if (err.message.includes('Request did not return JSON')) return true;
+
+        // Handle the request based on your other config options, e.g. `statusCodesToRetry`
+        return rax.shouldRetryRequest(err);
+      },
     },
     options.rax
   );
