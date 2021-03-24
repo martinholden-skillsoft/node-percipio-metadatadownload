@@ -13,6 +13,7 @@ const JSONStream = require('jsonstream2');
 const rateLimit = require('axios-rate-limit');
 const rax = require('retry-axios');
 const { accessSafe } = require('access-safe');
+const { v4: uuidv4 } = require('uuid');
 
 const { transports } = require('winston');
 const logger = require('./lib/logger');
@@ -43,9 +44,6 @@ const processTemplate = (templateString, templateVars) => {
  */
 const callPercipio = (options, axiosInstance = Axios) => {
   return new Promise((resolve, reject) => {
-    const loggingOptions = {
-      label: 'callPercipio',
-    };
     const opts = _.cloneDeep(options);
     const requestUri = processTemplate(opts.request.uritemplate, opts.request.path);
 
@@ -63,7 +61,8 @@ const callPercipio = (options, axiosInstance = Axios) => {
       },
       method: opts.request.method,
       timeout: opts.request.timeout || 2000,
-      loggingOptions,
+      correlationid: uuidv4(),
+      logger,
     };
 
     if (!_.isEmpty(requestBody)) {
@@ -77,29 +76,9 @@ const callPercipio = (options, axiosInstance = Axios) => {
     axiosInstance
       .request(axiosConfig)
       .then((response) => {
-        logger.debug(
-          `CorrelationId: ${response.config.correlationid}. Response Headers: ${stringifySafe(
-            response.headers
-          )}`,
-          loggingOptions
-        );
         resolve(response);
       })
       .catch((err) => {
-        if (err.response) {
-          logger.debug(
-            `CorrelationId: ${err.response.config.correlationid}. Response Headers: ${stringifySafe(
-              err.response.headers
-            )}`,
-            loggingOptions
-          );
-          logger.debug(
-            `CorrelationId: ${err.response.config.correlationid}. Response Body: ${stringifySafe(
-              err.response.data
-            )}`,
-            loggingOptions
-          );
-        }
         reject(err);
       });
   });
@@ -130,27 +109,26 @@ const getPage = (
     const opts = _.cloneDeep(options);
     opts.request.query.offset = offset;
 
-    try {
-      callPercipio(opts, axiosInstance).then((response) => {
+    callPercipio(opts, axiosInstance)
+      .then((response) => {
         const result = {
           count: accessSafe(() => response.data.length, 0),
-          offset: accessSafe(() => response.config.params.offset, 0),
-          max: accessSafe(() => response.config.params.max, 0),
           start: accessSafe(() => response.config.params.offset, 0),
           end:
             accessSafe(() => response.config.params.offset, 0) +
             accessSafe(() => response.config.params.max, 0),
-          duration: accessSafe(() => response.timings.durationms, null),
+          durationms: accessSafe(() => response.timings.durationms, null),
           sent: accessSafe(() => response.timings.sent.toISOString(), null),
+          correlationid: accessSafe(() => response.config.correlationid, null),
         };
 
         const message = [];
+        message.push(`CorrelationId: ${result.correlationid}.`);
         message.push(
-          `Content Data Requested ${result.start.toLocaleString()} to ${result.end.toLocaleString()}.`
+          `Records Requested: ${result.start.toLocaleString()} to ${result.end.toLocaleString()}.`
         );
-        message.push(`Request Duration ms: ${result.duration}.`);
-        message.push(`Request Sent: ${result.sent}.`);
-        message.push(`Total Content Data Downloaded: ${result.count.toLocaleString()}.`);
+        message.push(`Duration ms: ${result.durationms}.`);
+        message.push(`Records Returned: ${result.count.toLocaleString()}.`);
         logger.info(`${message.join(' ')}`, loggingOptions);
 
         if (result.count > 0) {
@@ -164,11 +142,11 @@ const getPage = (
         } else {
           resolve(result);
         }
+      })
+      .catch((err) => {
+        logger.error(`CorrelationId: ${err.config.correlationid}. ${err.message}`, loggingOptions);
+        reject(err);
       });
-    } catch (err) {
-      logger.error(`ERROR: trying to download results : ${err}`, loggingOptions);
-      reject(err);
-    }
   });
 };
 
@@ -189,108 +167,108 @@ const getAllPages = (options, maxrecords, axiosInstance = Axios) => {
     const opts = _.cloneDeep(options);
     const outputFile = Path.join(opts.output.path, opts.output.filename);
     const rawoutputfile = Path.join(opts.output.path, opts.output.rawdatafilename);
-    opts.logcount = opts.logcount || 500;
+    opts.logcount = opts.logcount || 1000;
 
     let downloadedRecords = 0;
 
-    try {
-      const jsonataStream = jsonataTransformStream(opts);
-      const csvStream = csvTransformStream(opts); // Use object mode and outputs object
-      const outputStream = fs.createWriteStream(outputFile);
+    const jsonataStream = jsonataTransformStream(opts);
+    const csvStream = csvTransformStream(opts); // Use object mode and outputs object
+    const outputStream = fs.createWriteStream(outputFile);
 
-      if (opts.includeBOM) {
-        outputStream.write(Buffer.from('\uFEFF'));
-      }
-
-      outputStream.on('error', (error) => {
-        logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
-      });
-
-      jsonataStream.on('error', (error) => {
-        logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
-      });
-
-      csvStream.on('error', (error) => {
-        logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
-      });
-
-      csvStream.on('progress', (counter) => {
-        if (counter % opts.logcount === 0) {
-          logger.info(`Processing. Processed: ${counter.toLocaleString()}`, {
-            label: `${loggingOptions.label}-csvStream`,
-          });
-        }
-      });
-
-      jsonataStream.on('progress', (counter) => {
-        if (counter % opts.logcount === 0) {
-          logger.info(`Processing. Processed: ${counter.toLocaleString()}`, {
-            label: `${loggingOptions.label}-jsonataStream`,
-          });
-        }
-      });
-
-      outputStream.on('finish', () => {
-        let saved = false;
-        if (downloadedRecords === 0) {
-          logger.info('No records downloaded', loggingOptions);
-          fs.unlinkSync(outputFile);
-        } else {
-          logger.info(
-            `Total Records Downloaded: ${downloadedRecords.toLocaleString()}`,
-            loggingOptions
-          );
-          saved = true;
-          logger.info(`Records Saved. Path: ${outputFile}`, loggingOptions);
-        }
-
-        resolve({ saved, outputFile });
-      });
-
-      const rawsteps = [];
-
-      if (opts.output.includeRawdata) {
-        rawsteps.push(JSONStream.stringify());
-        rawsteps.push(fs.createWriteStream(rawoutputfile));
-      }
-
-      const rawchain = new Combiner(rawsteps);
-      rawchain.on('error', (error) => {
-        logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
-      });
-
-      const chain = new Combiner([jsonataStream, csvStream, outputStream]);
-      chain.on('error', (error) => {
-        logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
-      });
-
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        const requests = [];
-        for (let index = 0; index <= maxrecords; index += opts.request.query.max) {
-          requests.push(getPage(opts, index, chain, rawchain, axiosInstance));
-        }
-
-        Promise.allSettled(requests).then((data) => {
-          logger.debug(`Results. ${stringifySafe(data)}`, loggingOptions);
-          downloadedRecords = data.reduce((total, currentValue) => {
-            const count = accessSafe(() => currentValue.value.count, 0);
-            return total + count;
-          }, 0);
-
-          // Once we've written each record in the record-set, we have to end the stream so that
-          // the TRANSFORM stream knows to output the end of the array it is generating.
-          // jsonataStream.end();
-          rawchain.end();
-          chain.end();
-        });
-      } catch (err) {
-        logger.error('ERROR: trying to download results', loggingOptions);
-        reject(err);
-      }
-    } catch (error) {
-      reject(error);
+    if (opts.includeBOM) {
+      outputStream.write(Buffer.from('\uFEFF'));
     }
+
+    outputStream.on('error', (error) => {
+      logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
+      reject(error);
+    });
+
+    jsonataStream.on('error', (error) => {
+      logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
+      reject(error);
+    });
+
+    csvStream.on('error', (error) => {
+      logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
+      reject(error);
+    });
+
+    csvStream.on('progress', (counter) => {
+      if (counter % opts.logcount === 0) {
+        logger.debug(`Processing. Processed: ${counter.toLocaleString()}`, {
+          label: `${loggingOptions.label}-csvStream`,
+        });
+      }
+    });
+
+    jsonataStream.on('progress', (counter) => {
+      if (counter % opts.logcount === 0) {
+        logger.debug(`Processing. Processed: ${counter.toLocaleString()}`, {
+          label: `${loggingOptions.label}-jsonataStream`,
+        });
+      }
+    });
+
+    outputStream.on('finish', () => {
+      let saved = false;
+      if (downloadedRecords === 0) {
+        logger.info('No records downloaded', loggingOptions);
+        fs.unlinkSync(outputFile);
+      } else {
+        logger.info(
+          `Total Records Downloaded: ${downloadedRecords.toLocaleString()}`,
+          loggingOptions
+        );
+        saved = true;
+        logger.info(`Records Saved. Path: ${outputFile}`, loggingOptions);
+      }
+
+      resolve({ saved, outputFile });
+    });
+
+    const rawsteps = [];
+
+    if (opts.output.includeRawdata) {
+      rawsteps.push(JSONStream.stringify());
+      rawsteps.push(fs.createWriteStream(rawoutputfile));
+    }
+
+    const rawchain = new Combiner(rawsteps);
+    rawchain.on('error', (error) => {
+      logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
+      reject(error);
+    });
+
+    const chain = new Combiner([jsonataStream, csvStream, outputStream]);
+    chain.on('error', (error) => {
+      logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
+      reject(error);
+    });
+
+    const requests = [];
+    for (let index = 0; index <= maxrecords; index += opts.request.query.max) {
+      requests.push(getPage(opts, index, chain, rawchain, axiosInstance));
+    }
+
+    Promise.allSettled(requests)
+      .then((data) => {
+        logger.debug(`Results. ${stringifySafe(data)}`, loggingOptions);
+        downloadedRecords = data.reduce((total, currentValue) => {
+          const count = accessSafe(() => currentValue.value.count, 0);
+          return total + count;
+        }, 0);
+
+        // Once we've written each record in the record-set, we have to end the stream so that
+        // the TRANSFORM stream knows to output the end of the array it is generating.
+        // jsonataStream.end();
+        rawchain.end();
+        chain.end();
+      })
+      .catch((err) => {
+        logger.error(`${err}`, loggingOptions);
+        reject(err);
+      });
   });
 };
 
@@ -315,8 +293,8 @@ const getAssetCount = (options, axiosInstance = Axios) => {
       pagingRequestId: null,
     };
 
-    try {
-      callPercipio(opts, axiosInstance).then((response) => {
+    callPercipio(opts, axiosInstance)
+      .then((response) => {
         results.total = parseInt(response.headers['x-total-count'], 10);
         results.pagingRequestId = response.headers['x-paging-request-id'];
         logger.info(
@@ -328,11 +306,11 @@ const getAssetCount = (options, axiosInstance = Axios) => {
           loggingOptions
         );
         resolve(results);
+      })
+      .catch((err) => {
+        logger.error(`${err}`, loggingOptions);
+        reject(err);
       });
-    } catch (err) {
-      logger.error('ERROR: trying to download results', loggingOptions);
-      reject(err);
-    }
   });
 };
 
@@ -429,48 +407,74 @@ const main = (configOptions) => {
         const raxcfg = rax.getConfig(err);
         logger.warn(
           `CorrelationId: ${err.config.correlationid}. Retry attempt #${raxcfg.currentRetryAttempt}`,
-          err.config.loggingOptions
+          {
+            label: 'onRetryAttempt',
+          }
         );
       },
       // Override the decision making process on if you should retry
       shouldRetry: (err) => {
         const cfg = rax.getConfig(err);
         // ensure max retries is always respected
-        if (cfg.currentRetryAttempt >= cfg.retry) return false;
+        if (cfg.currentRetryAttempt >= cfg.retry) {
+          logger.error(`CorrelationId: ${err.config.correlationid}. Maximum retries reached.`, {
+            label: `shouldRetry`,
+          });
+          return false;
+        }
 
         // Always retry if response was not JSON
-        if (err.message.includes('Request did not return JSON')) return true;
+        if (err.message.includes('Request did not return JSON')) {
+          logger.warn(
+            `CorrelationId: ${err.config.correlationid}. Request did not return JSON. Retrying.`,
+            {
+              label: `shouldRetry`,
+            }
+          );
+          return true;
+        }
 
         // Handle the request based on your other config options, e.g. `statusCodesToRetry`
-        return rax.shouldRetryRequest(err);
+        if (rax.shouldRetryRequest(err)) {
+          return true;
+        }
+        logger.error(`CorrelationId: ${err.config.correlationid}. None retryable error.`, {
+          label: `shouldRetry`,
+        });
+        return false;
       },
     },
     options.rax
   );
   rax.attach(axiosInstance);
 
-  getAssetCount(options, axiosInstance).then((response) => {
-    // Percipio API returns a paged response, so retrieve all pages
-    options.request.query.pagingRequestId = response.pagingRequestId;
+  getAssetCount(options, axiosInstance)
+    .then((response) => {
+      // Percipio API returns a paged response, so retrieve all pages
+      options.request.query.pagingRequestId = response.pagingRequestId;
 
-    if (response.total > 0) {
-      getAllPages(options, response.total, axiosInstance)
-        .then(() => {
-          const obj = {
-            orgid: options.request.path.orgId,
-            date: options.startTime.format(),
-          };
-          jsonfile.writeFileSync(lastrunFile, obj);
-          logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
-        })
-        .catch((err) => {
-          logger.error(`Error:  ${err}`, loggingOptions);
-        });
-    } else {
-      logger.info('No records to download', loggingOptions);
+      if (response.total > 0) {
+        getAllPages(options, response.total, axiosInstance)
+          .then(() => {
+            const obj = {
+              orgid: options.request.path.orgId,
+              date: options.startTime.format(),
+            };
+            jsonfile.writeFileSync(lastrunFile, obj);
+            logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
+          })
+          .catch((err) => {
+            logger.error(`Error:  ${err}`, loggingOptions);
+          });
+      } else {
+        logger.info('No records to download', loggingOptions);
+        logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
+      }
+    })
+    .catch((err) => {
+      logger.error(`Error:  ${err}`, loggingOptions);
       logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
-    }
-  });
+    });
   return true;
 };
 
