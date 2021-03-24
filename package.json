@@ -1,6 +1,6 @@
 {
 	"name": "node-percipio-metadatadownload",
-	"version": "1.2.0",
+	"version": "1.3.0",
 	"description": "Retrieves metadata about the available content items from Percipio, transforms the Percipio JSON response using JSONata and save as Comma Delimited Text File (CSV)",
 	"main": "app.js",
 	"scripts": {
