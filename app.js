@@ -179,19 +179,19 @@ const getAllPages = (options, maxrecords, axiosInstance = Axios) => {
       outputStream.write(Buffer.from('\uFEFF'));
     }
 
-    outputStream.on('error', (error) => {
-      logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
-      reject(error);
+    outputStream.on('error', (err) => {
+      logger.error(err, loggingOptions);
+      reject(err);
     });
 
-    jsonataStream.on('error', (error) => {
-      logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
-      reject(error);
+    jsonataStream.on('error', (err) => {
+      logger.error(err, loggingOptions);
+      reject(err);
     });
 
-    csvStream.on('error', (error) => {
-      logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
-      reject(error);
+    csvStream.on('error', (err) => {
+      logger.error(err, loggingOptions);
+      reject(err);
     });
 
     csvStream.on('progress', (counter) => {
@@ -235,15 +235,15 @@ const getAllPages = (options, maxrecords, axiosInstance = Axios) => {
     }
 
     const rawchain = new Combiner(rawsteps);
-    rawchain.on('error', (error) => {
-      logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
-      reject(error);
+    rawchain.on('error', (err) => {
+      logger.error(err, loggingOptions);
+      reject(err);
     });
 
     const chain = new Combiner([jsonataStream, csvStream, outputStream]);
-    chain.on('error', (error) => {
-      logger.error(`Error. Path: ${stringifySafe(error)}`, loggingOptions);
-      reject(error);
+    chain.on('error', (err) => {
+      logger.error(err, loggingOptions);
+      reject(err);
     });
 
     const requests = [];
@@ -266,7 +266,7 @@ const getAllPages = (options, maxrecords, axiosInstance = Axios) => {
         chain.end();
       })
       .catch((err) => {
-        logger.error(`${err}`, loggingOptions);
+        logger.error(err, loggingOptions);
         reject(err);
       });
   });
@@ -297,18 +297,17 @@ const getAssetCount = (options, axiosInstance = Axios) => {
       .then((response) => {
         results.total = parseInt(response.headers['x-total-count'], 10);
         results.pagingRequestId = response.headers['x-paging-request-id'];
-        logger.info(
-          `Total Records to download as reported in header['x-total-count'] ${results.total.toLocaleString()}`,
-          loggingOptions
-        );
-        logger.info(
-          `Paging request id in header['x-paging-request-id'] ${results.pagingRequestId}`,
-          loggingOptions
-        );
+        const message = [];
+        message.push(`Total Records ['x-total-count']: ${results.total.toLocaleString()}`);
+
+        if (results.pagingRequestId !== null) {
+          message.push(`Paging request id ['x-paging-request-id']: ${results.pagingRequestId}`);
+        }
+        logger.info(`${message.join(' ')}`, loggingOptions);
         resolve(results);
       })
       .catch((err) => {
-        logger.error(`${err}`, loggingOptions);
+        logger.error(err, loggingOptions);
         reject(err);
       });
   });
@@ -417,9 +416,20 @@ const main = (configOptions) => {
         const cfg = rax.getConfig(err);
         // ensure max retries is always respected
         if (cfg.currentRetryAttempt >= cfg.retry) {
-          logger.error(`CorrelationId: ${err.config.correlationid}. Maximum retries reached.`, {
+          logger.warn(`CorrelationId: ${err.config.correlationid}. Maximum retries reached.`, {
             label: `shouldRetry`,
           });
+          return false;
+        }
+
+        // ensure max retries for NO RESPONSE errors is always respected
+        if (cfg.currentRetryAttempt >= cfg.noResponseRetries) {
+          logger.warn(
+            `CorrelationId: ${err.config.correlationid}. Maximum retries reached for No Response Errors.`,
+            {
+              label: `shouldRetry`,
+            }
+          );
           return false;
         }
 
@@ -438,6 +448,7 @@ const main = (configOptions) => {
         if (rax.shouldRetryRequest(err)) {
           return true;
         }
+
         logger.error(`CorrelationId: ${err.config.correlationid}. None retryable error.`, {
           label: `shouldRetry`,
         });
@@ -464,7 +475,7 @@ const main = (configOptions) => {
             logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
           })
           .catch((err) => {
-            logger.error(`Error:  ${err}`, loggingOptions);
+            logger.error(err, loggingOptions);
           });
       } else {
         logger.info('No records to download', loggingOptions);
@@ -472,7 +483,7 @@ const main = (configOptions) => {
       }
     })
     .catch((err) => {
-      logger.error(`Error:  ${err}`, loggingOptions);
+      logger.error(err, loggingOptions);
       logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
     });
   return true;
