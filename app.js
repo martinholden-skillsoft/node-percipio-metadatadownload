@@ -150,7 +150,7 @@ const getPage = (
         }
       })
       .catch((err) => {
-        logger.error(`CorrelationId: ${err.config.correlationid}. ${err.message}`, loggingOptions);
+        logger.error(err, loggingOptions);
         reject(err);
       });
   });
