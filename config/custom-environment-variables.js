@@ -7,11 +7,21 @@ const config = {};
 config.transform = 'TRANSFORM';
 
 // Boolean that indicates if ALL records should be retrieved
-config.allRecords = 'ALLRECORDS';
+// Defining as object means the environment variable is parsed according to the format in __format.
+// Using json meansthe true/false environment variable STRINGS are parsed to booleans.
+config.allRecords = {
+  __name: 'ALLRECORDS',
+  __format: 'json',
+};
 
 config.output = {};
 // Boolean that indicates if the raw JSON should be saved.
-config.output.includeRawdata = 'INCLUDERAWDATA';
+// Defining as object means the environment variable is parsed according to the format in __format.
+// Using json meansthe true/false environment variable STRINGS are parsed to booleans.
+config.output.includeRawdata = {
+  __name: 'INCLUDERAWDATA',
+  __format: 'json',
+};
 
 config.request = {};
 config.request.bearer = 'BEARER';
