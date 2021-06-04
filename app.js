@@ -133,7 +133,13 @@ const getPage = (
 
         if (result.count > 0) {
           response.data.forEach((record) => {
-            if (opts.output.includeRawdata) {
+            if (
+              accessSafe(
+                () =>
+                  _.isBoolean(opts.output.includeRawdata) ? opts.output.includeRawdata : false,
+                false
+              )
+            ) {
               rawProcessStream.write(record);
             }
             transformProcessStream.write(record);
@@ -196,7 +202,7 @@ const getAllPages = (options, maxrecords, axiosInstance = Axios) => {
 
     csvStream.on('progress', (counter) => {
       if (counter % opts.logcount === 0) {
-        logger.debug(`Processing. Processed: ${counter.toLocaleString()}`, {
+        logger.info(`Processing. Processed: ${counter.toLocaleString()}`, {
           label: `${loggingOptions.label}-csvStream`,
         });
       }
@@ -204,7 +210,7 @@ const getAllPages = (options, maxrecords, axiosInstance = Axios) => {
 
     jsonataStream.on('progress', (counter) => {
       if (counter % opts.logcount === 0) {
-        logger.debug(`Processing. Processed: ${counter.toLocaleString()}`, {
+        logger.info(`Processing. Processed: ${counter.toLocaleString()}`, {
           label: `${loggingOptions.label}-jsonataStream`,
         });
       }
@@ -229,7 +235,12 @@ const getAllPages = (options, maxrecords, axiosInstance = Axios) => {
 
     const rawsteps = [];
 
-    if (opts.output.includeRawdata) {
+    if (
+      accessSafe(
+        () => (_.isBoolean(opts.output.includeRawdata) ? opts.output.includeRawdata : false),
+        false
+      )
+    ) {
       rawsteps.push(JSONStream.stringify());
       rawsteps.push(fs.createWriteStream(rawoutputfile));
     }
@@ -364,7 +375,7 @@ const main = (configOptions) => {
   const lastrunFile = 'lastrun.json';
 
   // If the ALLRECORDS env is set force null updatedSince
-  if (accessSafe(() => options.allRecords, false)) {
+  if (accessSafe(() => (_.isBoolean(options.allRecords) ? options.allRecords : false), false)) {
     if (fs.existsSync(lastrunFile)) {
       fs.unlinkSync(lastrunFile);
     }
