@@ -176,6 +176,7 @@ const getAllPages = (options, maxrecords, axiosInstance = Axios) => {
     opts.logcount = opts.logcount || 1000;
 
     let downloadedRecords = 0;
+    let rejectedRequests = [];
 
     const jsonataStream = jsonataTransformStream(opts);
     const csvStream = csvTransformStream(opts); // Use object mode and outputs object
@@ -218,10 +219,35 @@ const getAllPages = (options, maxrecords, axiosInstance = Axios) => {
 
     outputStream.on('finish', () => {
       let saved = false;
-      if (downloadedRecords === 0) {
+      const rejectedrequestcount = accessSafe(() => rejectedRequests.length, 0);
+      const includeRawdata = accessSafe(
+        () => (_.isBoolean(opts.output.includeRawdata) ? opts.output.includeRawdata : false),
+        false
+      );
+
+      if (rejectedrequestcount > 0) {
+        if (includeRawdata) {
+          // Delete the raw output file because incomplete request
+          logger.warn(
+            `Rawdata file deleted because ${rejectedRequests.length} requests did not complete. `,
+            loggingOptions
+          );
+          fs.unlinkSync(rawoutputfile);
+        }
+        // Delete the output file because incomplete request
+        logger.warn(
+          `Downloaded Records file deleted because ${rejectedRequests.length} requests did not complete. `,
+          loggingOptions
+        );
+        fs.unlinkSync(outputFile);
+      }
+
+      if (downloadedRecords === 0 && rejectedrequestcount === 0) {
         logger.info('No records downloaded', loggingOptions);
         fs.unlinkSync(outputFile);
-      } else {
+      }
+
+      if (downloadedRecords > 0 && rejectedrequestcount === 0) {
         logger.info(
           `Total Records Downloaded: ${downloadedRecords.toLocaleString()}`,
           loggingOptions
@@ -230,7 +256,11 @@ const getAllPages = (options, maxrecords, axiosInstance = Axios) => {
         logger.info(`Records Saved. Path: ${outputFile}`, loggingOptions);
       }
 
-      resolve({ saved, outputFile });
+      resolve({
+        saved,
+        outputFile,
+        rejectedrequestcount,
+      });
     });
 
     const rawsteps = [];
@@ -264,6 +294,10 @@ const getAllPages = (options, maxrecords, axiosInstance = Axios) => {
 
     Promise.allSettled(requests)
       .then((data) => {
+        rejectedRequests = data.filter((request) => {
+          return request.status === 'rejected';
+        });
+
         logger.debug(`Results. ${stringifySafe(data)}`, loggingOptions);
         downloadedRecords = data.reduce((total, currentValue) => {
           const count = accessSafe(() => currentValue.value.count, 0);
@@ -477,12 +511,14 @@ const main = (configOptions) => {
 
       if (response.total > 0) {
         getAllPages(options, response.total, axiosInstance)
-          .then(() => {
-            const obj = {
-              orgid: options.request.path.orgId,
-              date: options.startTime.format(),
-            };
-            jsonfile.writeFileSync(lastrunFile, obj);
+          .then((results) => {
+            if (results.rejectedrequestcount === 0) {
+              const obj = {
+                orgid: options.request.path.orgId,
+                date: options.startTime.format(),
+              };
+              jsonfile.writeFileSync(lastrunFile, obj);
+            }
             logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
           })
           .catch((err) => {
