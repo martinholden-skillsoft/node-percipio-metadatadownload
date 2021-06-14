@@ -75,6 +75,7 @@ $.(
     'MODALITY': '',
     'LAUNCHLINK': '',
     'THUMBNAIL': '',
+    'ALTERNATETHUMBNAIL': '',
     'STATUS' : '',
     'LASTUPDATED' : '',
     'LASTUPDATED_RELATIVE' : ''
@@ -94,6 +95,7 @@ $.(
         'MODALITY': $join(modalities, ','),
         'LAUNCHLINK': link,
         'THUMBNAIL': imageUrl,
+        'ALTERNATETHUMBNAIL': alternateImageUrl,
         'STATUS' : lifecycle.status,
         'LASTUPDATED' : lifecycle.lastUpdatedDate ? lifecycle.lastUpdatedDate : '',
         'LASTUPDATED_RELATIVE' : lifecycle.lastUpdatedDate ? $moment(lifecycle.lastUpdatedDate).fromNow() : ''
