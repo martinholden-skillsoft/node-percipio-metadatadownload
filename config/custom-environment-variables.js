@@ -3,6 +3,9 @@
 
 const config = {};
 
+// Local JSON filename
+config.source = 'SOURCE';
+
 // The transform filename in transform folder.
 config.transform = 'TRANSFORM';
 

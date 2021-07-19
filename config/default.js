@@ -3,7 +3,10 @@ const defer = require('config/defer').deferConfig;
 
 const config = {};
 
-// The trasnform file to use
+// The local JSON file
+config.source = null;
+
+// The transform file to use
 config.transform = 'transform/default.jsonata';
 
 // Boolean that indicates if ALL records should be retrieved

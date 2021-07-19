@@ -359,6 +359,110 @@ const getAssetCount = (options, axiosInstance = Axios) => {
 };
 
 /**
+ * Read an existing JSON file
+ *
+ * @param {*} options
+ * @returns {Promise} resolves to boolean to indicate if results saved and the filename
+ */
+const readJSON = (options, source) => {
+  return new Promise((resolve, reject) => {
+    const loggingOptions = {
+      label: 'readJSON',
+    };
+
+    const opts = _.cloneDeep(options);
+    const outputFile = Path.join(opts.output.path, opts.output.filename);
+    opts.logcount = opts.logcount || 1000;
+
+    let loadedRecords = 0;
+
+    const inputStream = fs.createReadStream(source);
+    // When we read in the Array, we want to emit a "data" event for every item in
+    // the serialized record-set. As such, we are going to use the path "*".
+    const parseJSONStream = JSONStream.parse('*');
+    const jsonataStream = jsonataTransformStream(opts);
+    const csvStream = csvTransformStream(opts); // Use object mode and outputs object
+    const outputStream = fs.createWriteStream(outputFile);
+
+    if (opts.includeBOM) {
+      outputStream.write(Buffer.from('\uFEFF'));
+    }
+
+    parseJSONStream.on('data', () => {
+      if (loadedRecords !== 0 && loadedRecords % opts.logcount === 0) {
+        logger.info(`Processing. Processed: ${loadedRecords.toLocaleString()}`, {
+          label: `${loggingOptions.label}-parseJSONStream`,
+        });
+      }
+      loadedRecords += 1;
+    });
+
+    outputStream.on('error', (err) => {
+      logger.error(err, loggingOptions);
+      reject(err);
+    });
+
+    jsonataStream.on('error', (err) => {
+      logger.error(err, loggingOptions);
+      reject(err);
+    });
+
+    csvStream.on('error', (err) => {
+      logger.error(err, loggingOptions);
+      reject(err);
+    });
+
+    csvStream.on('progress', (counter) => {
+      if (counter % opts.logcount === 0) {
+        logger.info(`Processing. Processed: ${counter.toLocaleString()}`, {
+          label: `${loggingOptions.label}-csvStream`,
+        });
+      }
+    });
+
+    jsonataStream.on('progress', (counter) => {
+      if (counter % opts.logcount === 0) {
+        logger.info(`Processing. Processed: ${counter.toLocaleString()}`, {
+          label: `${loggingOptions.label}-jsonataStream`,
+        });
+      }
+    });
+
+    outputStream.on('finish', () => {
+      let saved = false;
+
+      if (loadedRecords === 0) {
+        logger.info('No records downloaded', loggingOptions);
+        fs.unlinkSync(outputFile);
+      }
+
+      if (loadedRecords > 0) {
+        logger.info(`Total Records Downloaded: ${loadedRecords.toLocaleString()}`, loggingOptions);
+        saved = true;
+        logger.info(`Records Saved. Path: ${outputFile}`, loggingOptions);
+      }
+
+      resolve({
+        saved,
+        outputFile,
+      });
+    });
+
+    const chain = new Combiner([
+      inputStream,
+      parseJSONStream,
+      jsonataStream,
+      csvStream,
+      outputStream,
+    ]);
+    chain.on('error', (err) => {
+      logger.error(err, loggingOptions);
+      reject(err);
+    });
+  });
+};
+
+/**
  * Process the Percipio call
  *
  * @param {*} options
@@ -403,136 +507,153 @@ const main = (configOptions) => {
 
   logger.debug(`Options: ${stringifySafe(options)}`, loggingOptions);
 
-  // Check if we should load the lastrun date from file - we do this only if:
-  // updatedSinceis null - so not set in config or passed thru ENV
-  // If file does not exist we use null
-  const lastrunFile = 'lastrun.json';
-
-  // If the ALLRECORDS env is set force null updatedSince
-  if (accessSafe(() => (_.isBoolean(options.allRecords) ? options.allRecords : false), false)) {
-    if (fs.existsSync(lastrunFile)) {
-      fs.unlinkSync(lastrunFile);
+  if (accessSafe(() => options.source, false)) {
+    if (fs.existsSync(options.source)) {
+      logger.info(`Processing local JSON: ${options.source}`, loggingOptions);
+      readJSON(options, options.source)
+        .then(() => {
+          logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
+        })
+        .catch((err) => {
+          logger.error(err, loggingOptions);
+          logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
+        });
+    } else {
+      logger.error(`File not found for local JSON: ${options.source}`, loggingOptions);
+      logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
     }
-  }
+  } else {
+    // Check if we should load the lastrun date from file - we do this only if:
+    // updatedSinceis null - so not set in config or passed thru ENV
+    // If file does not exist we use null
+    const lastrunFile = 'lastrun.json';
 
-  if (_.isNull(options.request.query.updatedSince)) {
-    if (fs.existsSync(lastrunFile)) {
-      const lastrun = jsonfile.readFileSync(lastrunFile);
-      if (lastrun.orgid === options.request.path.orgId) {
-        options.request.query.updatedSince = lastrun.date;
-
-        logger.info(
-          `Request updatedSince filter set to: ${options.request.query.updatedSince}`,
-          loggingOptions
-        );
-      } else {
+    // If the ALLRECORDS env is set force null updatedSince
+    if (accessSafe(() => (_.isBoolean(options.allRecords) ? options.allRecords : false), false)) {
+      if (fs.existsSync(lastrunFile)) {
         fs.unlinkSync(lastrunFile);
-        logger.info('Last run file from different orgid and so deleted', loggingOptions);
       }
     }
-  }
 
-  logger.info('Calling Percipio', loggingOptions);
+    if (_.isNull(options.request.query.updatedSince)) {
+      if (fs.existsSync(lastrunFile)) {
+        const lastrun = jsonfile.readFileSync(lastrunFile);
+        if (lastrun.orgid === options.request.path.orgId) {
+          options.request.query.updatedSince = lastrun.date;
 
-  // Create an axios instance that this will allow us to replace
-  // with ratelimiting
-  // see https://github.com/aishek/axios-rate-limit
-  const axiosInstance = rateLimit(Axios.create({ adapter: timingAdapter }), options.ratelimit);
+          logger.info(
+            `Request updatedSince filter set to: ${options.request.query.updatedSince}`,
+            loggingOptions
+          );
+        } else {
+          fs.unlinkSync(lastrunFile);
+          logger.info('Last run file from different orgid and so deleted', loggingOptions);
+        }
+      }
+    }
 
-  // Add Axios Retry
-  // see https://github.com/JustinBeckwith/retry-axios
-  axiosInstance.defaults.raxConfig = _.merge(
-    {},
-    {
-      instance: axiosInstance,
-      // You can detect when a retry is happening, and figure out how many
-      // retry attempts have been made
-      onRetryAttempt: (err) => {
-        const raxcfg = rax.getConfig(err);
-        logger.warn(
-          `CorrelationId: ${err.config.correlationid}. Retry attempt #${raxcfg.currentRetryAttempt}`,
-          {
-            label: 'onRetryAttempt',
+    logger.info('Calling Percipio', loggingOptions);
+
+    // Create an axios instance that this will allow us to replace
+    // with ratelimiting
+    // see https://github.com/aishek/axios-rate-limit
+    const axiosInstance = rateLimit(Axios.create({ adapter: timingAdapter }), options.ratelimit);
+
+    // Add Axios Retry
+    // see https://github.com/JustinBeckwith/retry-axios
+    axiosInstance.defaults.raxConfig = _.merge(
+      {},
+      {
+        instance: axiosInstance,
+        // You can detect when a retry is happening, and figure out how many
+        // retry attempts have been made
+        onRetryAttempt: (err) => {
+          const raxcfg = rax.getConfig(err);
+          logger.warn(
+            `CorrelationId: ${err.config.correlationid}. Retry attempt #${raxcfg.currentRetryAttempt}`,
+            {
+              label: 'onRetryAttempt',
+            }
+          );
+        },
+        // Override the decision making process on if you should retry
+        shouldRetry: (err) => {
+          const cfg = rax.getConfig(err);
+          // ensure max retries is always respected
+          if (cfg.currentRetryAttempt >= cfg.retry) {
+            logger.warn(`CorrelationId: ${err.config.correlationid}. Maximum retries reached.`, {
+              label: `shouldRetry`,
+            });
+            return false;
           }
-        );
-      },
-      // Override the decision making process on if you should retry
-      shouldRetry: (err) => {
-        const cfg = rax.getConfig(err);
-        // ensure max retries is always respected
-        if (cfg.currentRetryAttempt >= cfg.retry) {
-          logger.warn(`CorrelationId: ${err.config.correlationid}. Maximum retries reached.`, {
+
+          // ensure max retries for NO RESPONSE errors is always respected
+          if (cfg.currentRetryAttempt >= cfg.noResponseRetries) {
+            logger.warn(
+              `CorrelationId: ${err.config.correlationid}. Maximum retries reached for No Response Errors.`,
+              {
+                label: `shouldRetry`,
+              }
+            );
+            return false;
+          }
+
+          // Always retry if response was not JSON
+          if (err.message.includes('Request did not return JSON')) {
+            logger.warn(
+              `CorrelationId: ${err.config.correlationid}. Request did not return JSON. Retrying.`,
+              {
+                label: `shouldRetry`,
+              }
+            );
+            return true;
+          }
+
+          // Handle the request based on your other config options, e.g. `statusCodesToRetry`
+          if (rax.shouldRetryRequest(err)) {
+            return true;
+          }
+
+          logger.error(`CorrelationId: ${err.config.correlationid}. None retryable error.`, {
             label: `shouldRetry`,
           });
           return false;
-        }
-
-        // ensure max retries for NO RESPONSE errors is always respected
-        if (cfg.currentRetryAttempt >= cfg.noResponseRetries) {
-          logger.warn(
-            `CorrelationId: ${err.config.correlationid}. Maximum retries reached for No Response Errors.`,
-            {
-              label: `shouldRetry`,
-            }
-          );
-          return false;
-        }
-
-        // Always retry if response was not JSON
-        if (err.message.includes('Request did not return JSON')) {
-          logger.warn(
-            `CorrelationId: ${err.config.correlationid}. Request did not return JSON. Retrying.`,
-            {
-              label: `shouldRetry`,
-            }
-          );
-          return true;
-        }
-
-        // Handle the request based on your other config options, e.g. `statusCodesToRetry`
-        if (rax.shouldRetryRequest(err)) {
-          return true;
-        }
-
-        logger.error(`CorrelationId: ${err.config.correlationid}. None retryable error.`, {
-          label: `shouldRetry`,
-        });
-        return false;
+        },
       },
-    },
-    options.rax
-  );
-  rax.attach(axiosInstance);
+      options.rax
+    );
+    rax.attach(axiosInstance);
 
-  getAssetCount(options, axiosInstance)
-    .then((response) => {
-      // Percipio API returns a paged response, so retrieve all pages
-      options.request.query.pagingRequestId = response.pagingRequestId;
+    getAssetCount(options, axiosInstance)
+      .then((response) => {
+        // Percipio API returns a paged response, so retrieve all pages
+        options.request.query.pagingRequestId = response.pagingRequestId;
 
-      if (response.total > 0) {
-        getAllPages(options, response.total, axiosInstance)
-          .then((results) => {
-            if (results.rejectedrequestcount === 0) {
-              const obj = {
-                orgid: options.request.path.orgId,
-                date: options.startTime.format(),
-              };
-              jsonfile.writeFileSync(lastrunFile, obj);
-            }
-            logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
-          })
-          .catch((err) => {
-            logger.error(err, loggingOptions);
-          });
-      } else {
-        logger.info('No records to download', loggingOptions);
+        if (response.total > 0) {
+          getAllPages(options, response.total, axiosInstance)
+            .then((results) => {
+              if (results.rejectedrequestcount === 0) {
+                const obj = {
+                  orgid: options.request.path.orgId,
+                  date: options.startTime.format(),
+                };
+                jsonfile.writeFileSync(lastrunFile, obj);
+              }
+              logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
+            })
+            .catch((err) => {
+              logger.error(err, loggingOptions);
+            });
+        } else {
+          logger.info('No records to download', loggingOptions);
+          logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
+        }
+      })
+      .catch((err) => {
+        logger.error(err, loggingOptions);
         logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
-      }
-    })
-    .catch((err) => {
-      logger.error(err, loggingOptions);
-      logger.info(`End ${pjson.name} - v${pjson.version}`, loggingOptions);
-    });
+      });
+  }
   return true;
 };
 
