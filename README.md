@@ -8,6 +8,8 @@ To use this code you will need:
 1. A [Percipio Service Account](https://documentation.skillsoft.com/en_us/pes/Integration/Understanding-Percipio/rest-api/pes_authentication.htm) with permission for accessing the [CONTENT DISCOVERY API](https://documentation.skillsoft.com/en_us/pes/Integration/Understanding-Percipio/rest-api/pes_rest_api.htm)
    <br/><br/>
 
+The code can also be used to process a JSON file (as retrieved from the API) without the need to download the data, this is useful if you want to use different TRANSFORMS on the same data.
+
 # Configuration
 
 ## Creating a JSONata transform
@@ -39,11 +41,13 @@ Set the following environment variables, or create a .env file by copying [.env.
 
 | ENV        | Required | Description |
 | ---------- | -------- | ------------|
-| ORGID      | Required | This is the Percipio Organiation UUID for your Percipio Site. |
-| BEARER     | Required | This is the Percipio Bearer token for the Service Account.  |
-| BASEURL    | Required | This is set to the base URL for the appropriate Percipio data center. For US hosted use: https://api.percipio.com For EU hosted use: https://dew1-api.percipio.com |
+| ORGID      | Required for download | This is the Percipio Organiation UUID for your Percipio Site. |
+| BEARER     | Required for download | This is the Percipio Bearer token for the Service Account.  |
+| BASEURL    | Required for download | This is set to the base URL for the appropriate Percipio data center. For US hosted use: https://api.percipio.com For EU hosted use: https://dew1-api.percipio.com |
+| SOURCE    | Required for local file | This is the path to the previously downloaded JSON, this can be enabled by setting INCLUDERAWDATA=true |
 | TRANSFORM  | Optional | This is the path to the JSONata transform to use. The default is [transform/default.jsonata](transform/default.jsonata)|
 | ALLRECORDS | Optional | This controls whether all the records are retrieved. The default is **false** which means the date from the [lastrun.json](lastrun.json) file, if it exists, is used as the updatedSince filter for the [API](https://api.percipio.com/content-discovery/api-docs/#/Content/getCatalogContentV2) to retrieve just the changes since that date. If **true** or file does not exist then updatedSince filter is set to null and all records are retrieved. |
+| INCLUDERAWDATA | Optional | This controls whether the JSON records as retrieved are saved to file. The default is **false** which means the JSON records are not saved. |
 
 <br/>
 
@@ -60,7 +64,7 @@ or
 ```bash
 node ./app.js
 ```
-
+## Downloading and transforming
 The Percipio [API](https://api.percipio.com/content-discovery/api-docs/#/Content/getCatalogContentV2) wil be called repeatedly to download all available content items.
 
 The Percipio JSON data returned will then be transformed using the transform specified, the [default.jsonata](transform/default.jsonata) shows some ideas for basic processing of the returned JSON from Percipio.
@@ -71,6 +75,16 @@ The transformed JSON will then be saved in CSV format, with UTF-8 encoding to:
 results/YYYYMMDD_hhmmss_results.csv
 ```
 
+## Local file loading and transforming
+The Percipio JSON data returned will be loaded from the specified local file and transformed using the transform specified, the [default.jsonata](transform/default.jsonata) shows some ideas for basic processing of the returned JSON from Percipio.
+
+The transformed JSON will then be saved in CSV format, with UTF-8 encoding to:
+
+```
+results/YYYYMMDD_hhmmss_results.csv
+```
+
+## Timestamp Format
 The timestamp component is based on UTC time when the script runs:
 
 | DATEPART | COMMENTS                            |
@@ -82,10 +96,10 @@ The timestamp component is based on UTC time when the script runs:
 | mm       | Minutes (i.e. 00 01 ... 58 59)      |
 | ss       | Seconds (i.e. 00 01 ... 58 59)      |
 
-## Changelog
+# Changelog
 
 Please see [CHANGELOG](CHANGELOG.md) for more information what has changed recently.
 
-## License
+# License
 
 MIT © martinholden-skillsoft
